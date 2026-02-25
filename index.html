@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SB 1123 Lot Layout Planner</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script crossorigin src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #fafafa; color: #333; height: 100vh; overflow: hidden; }
+
+/* Title bar */
+.title-bar { display: flex; align-items: center; justify-content: space-between; background: #1B2A4A; color: white; padding: 10px 20px; height: 48px; flex-shrink: 0; }
+.title-bar h1 { font-size: 16px; font-weight: 600; letter-spacing: 0.3px; }
+.title-bar .brand { font-size: 13px; color: #8DA4C8; font-weight: 500; }
+.title-bar .address { font-size: 13px; color: #B8CCE8; font-weight: 400; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Main layout */
+.app-layout { display: flex; height: calc(100vh - 48px); }
+.sidebar { width: 288px; min-width: 288px; background: white; border-right: 1px solid #e0e0e0; overflow-y: auto; flex-shrink: 0; }
+.sidebar::-webkit-scrollbar { width: 6px; }
+.sidebar::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+.main-area { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.canvas-wrap { flex: 1; position: relative; overflow: hidden; background: #f5f5f5; }
+.stats-bar { background: white; border-top: 1px solid #e0e0e0; padding: 10px 16px; flex-shrink: 0; }
+
+/* Sidebar sections */
+.section { padding: 12px 16px; border-bottom: 1px solid #eee; }
+.section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #1B2A4A; margin-bottom: 10px; }
+.field { margin-bottom: 8px; }
+.field label { display: block; font-size: 11px; color: #666; margin-bottom: 3px; font-weight: 500; }
+.field input, .field select { width: 100%; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; background: #fafafa; }
+.field input:focus, .field select:focus { outline: none; border-color: #3B7DD8; background: white; }
+.field-row { display: flex; gap: 8px; }
+.field-row .field { flex: 1; }
+.toggle-group { display: flex; gap: 0; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; }
+.toggle-btn { flex: 1; padding: 5px 8px; font-size: 12px; border: none; background: #fafafa; cursor: pointer; text-align: center; transition: all 0.15s; }
+.toggle-btn.active { background: #3B7DD8; color: white; font-weight: 600; }
+.toggle-btn:not(.active):hover { background: #eee; }
+.checkbox-field { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.checkbox-field input[type="checkbox"] { width: auto; }
+.checkbox-field label { margin: 0; font-size: 12px; color: #333; }
+.action-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.btn { padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.15s; background: white; }
+.btn:hover { background: #f0f0f0; }
+.btn-primary { background: #3B7DD8; color: white; border-color: #3B7DD8; }
+.btn-primary:hover { background: #2C6BC0; }
+.btn-danger { color: #D32F2F; border-color: #D32F2F; }
+.btn-danger:hover { background: #FFEBEE; }
+.btn-sm { padding: 4px 8px; font-size: 10px; }
+
+/* Stats bar */
+.stats-grid { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; }
+.stat { display: flex; align-items: baseline; gap: 4px; }
+.stat-label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+.stat-value { font-size: 14px; font-weight: 700; color: #1B2A4A; }
+.stat-value.warn { color: #D32F2F; }
+.stat-value.ok { color: #2E7D32; }
+.stat-sep { width: 1px; height: 24px; background: #e0e0e0; margin: 0 4px; }
+.compliance-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+.compliance-badge.pass { background: #E8F5E9; color: #2E7D32; }
+.compliance-badge.fail { background: #FFEBEE; color: #D32F2F; }
+
+/* SVG canvas styles */
+.lot-svg { width: 100%; height: 100%; }
+.unit-rect { cursor: grab; transition: opacity 0.1s; }
+.unit-rect:hover { opacity: 0.85; }
+.unit-rect.dragging { cursor: grabbing; opacity: 0.7; }
+.unit-rect.invalid { stroke: #D32F2F !important; stroke-width: 3 !important; }
+.driveway-rect { cursor: ew-resize; }
+.setback-line { cursor: ns-resize; }
+.dim-label { font-family: -apple-system, BlinkMacSystemFont, sans-serif; pointer-events: none; }
+.tooltip-box { pointer-events: none; }
+
+/* Export buttons in title bar */
+.title-actions { display: flex; gap: 8px; align-items: center; }
+.title-btn { padding: 4px 12px; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; background: transparent; color: white; font-size: 12px; cursor: pointer; font-weight: 500; }
+.title-btn:hover { background: rgba(255,255,255,0.1); }
+
+/* Responsive */
+@media (max-width: 900px) {
+  .sidebar { width: 240px; min-width: 240px; }
+}
+@media (max-width: 700px) {
+  .app-layout { flex-direction: column; }
+  .sidebar { width: 100%; min-width: 0; max-height: 40vh; border-right: none; border-bottom: 1px solid #e0e0e0; }
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+/* ── URL params ────────────────────────────────────────── */
+function readParams() {
+  const p = new URLSearchParams(window.location.search);
+  return {
+    width: p.get('width') ? Number(p.get('width')) : 60,
+    depth: p.get('depth') ? Number(p.get('depth')) : 150,
+    zone: p.get('zone') || 'R1',
+    street: p.get('street') || 'S',
+    address: p.get('address') ? decodeURIComponent(p.get('address').replace(/\+/g,' ')) : '',
+    asking: p.get('asking') ? Number(p.get('asking')) : null,
+    lotSF: p.get('lotSF') ? Number(p.get('lotSF')) : null,
+    remDepth: p.get('remDepth') ? Number(p.get('remDepth')) : 0,
+    driveWidth: p.get('driveWidth') ? Number(p.get('driveWidth')) : 20,
+    driveSide: p.get('driveSide') || 'L',
+  };
+}
+
+/* ── Auto-layout engine ────────────────────────────────── */
+function computeAutoLayout(cfg) {
+  const { lotW, lotD, street, frontSB, sideSB, rearSB, driveW, driveSide, unitW, unitD,
+          hasRemainder, remDepth, doubleLoaded } = cfg;
+  // Buildable zone after setbacks
+  const useW = lotW - 2 * sideSB;
+  const useD = lotD - frontSB - rearSB - (hasRemainder ? remDepth : 0);
+  if (useW <= 0 || useD <= 0) return [];
+
+  const units = [];
+  if (doubleLoaded) {
+    // Central driveway, units on both sides
+    const rowW = (useW - driveW) / 2;
+    const unitsPerRow = Math.max(0, Math.floor(useD / unitW));
+    const leftX = sideSB;
+    const rightX = sideSB + rowW + driveW;
+    const startY = frontSB + (hasRemainder ? remDepth : 0);
+    let id = 1;
+    for (let i = 0; i < unitsPerRow && id <= 10; i++) {
+      units.push({ id: id++, x: leftX, y: startY + i * unitW, w: Math.min(unitD, rowW), h: unitW });
+    }
+    for (let i = 0; i < unitsPerRow && id <= 10; i++) {
+      units.push({ id: id++, x: rightX, y: startY + i * unitW, w: Math.min(unitD, rowW), h: unitW });
+    }
+  } else {
+    // Single-loaded: one row adjacent to driveway
+    const availW = useW - driveW;
+    if (availW < unitD) return [];
+    const unitsPerRow = Math.max(0, Math.floor(useD / unitW));
+    const startY = frontSB + (hasRemainder ? remDepth : 0);
+    const unitX = driveSide === 'L' ? sideSB + driveW : sideSB;
+    let id = 1;
+    for (let i = 0; i < unitsPerRow && id <= 10; i++) {
+      units.push({ id: id++, x: unitX, y: startY + i * unitW, w: Math.min(unitD, availW), h: unitW });
+    }
+  }
+  return units;
+}
+
+/* ── Constraint checks ─────────────────────────────────── */
+function checkConstraints(units, cfg) {
+  const { lotW, lotD, frontSB, sideSB, rearSB, hasRemainder, remDepth, driveW,
+          driveSide, doubleLoaded, stories, lotSFOverride } = cfg;
+  const warnings = [];
+  if (units.length > 10) warnings.push('Unit count exceeds 10 maximum');
+  const devArea = lotW * (lotD - (hasRemainder ? remDepth : 0));
+  const totalLotSF = lotSFOverride || lotW * lotD;
+  if (units.length > 0) {
+    const parcelSize = devArea / units.length;
+    if (parcelSize < 1200) warnings.push(`Avg parcel ${Math.round(parcelSize)} SF < 1,200 SF minimum`);
+  }
+  const unitArea = units.reduce((s, u) => s + u.w * u.h, 0);
+  const coverage = devArea > 0 ? unitArea / devArea : 0;
+  const buildableSF = unitArea * stories;
+  const far = devArea > 0 ? buildableSF / devArea : 0;
+  // FAR limits by unit count
+  let farLimit = 0.5;
+  if (units.length >= 8) farLimit = 1.25;
+  else if (units.length >= 3) farLimit = 1.0;
+  if (far > farLimit) warnings.push(`FAR ${far.toFixed(2)} exceeds ${farLimit} limit for ${units.length} units`);
+  // Check individual unit placement
+  const minY = frontSB + (hasRemainder ? remDepth : 0);
+  const maxY = lotD - rearSB;
+  units.forEach(u => {
+    if (u.x < sideSB - 0.5) warnings.push(`Unit ${u.id}: side setback violation (left)`);
+    if (u.x + u.w > lotW - sideSB + 0.5) warnings.push(`Unit ${u.id}: side setback violation (right)`);
+    if (u.y < minY - 0.5) warnings.push(`Unit ${u.id}: front setback violation`);
+    if (u.y + u.h > maxY + 0.5) warnings.push(`Unit ${u.id}: rear setback violation`);
+  });
+  // Avg unit habitable size
+  if (units.length > 0) {
+    const avgHab = (unitArea * stories) / units.length;
+    if (avgHab > 1750) warnings.push(`Avg unit ${Math.round(avgHab)} SF > 1,750 SF habitable max`);
+  }
+  return warnings;
+}
+
+/* ── Main App ──────────────────────────────────────────── */
+function App() {
+  const params = useMemo(readParams, []);
+  const [lotW, setLotW] = useState(params.width);
+  const [lotD, setLotD] = useState(params.depth);
+  const [zone, setZone] = useState(params.zone);
+  const [street, setStreet] = useState(params.street);
+  const [address, setAddress] = useState(params.address);
+  const [asking, setAsking] = useState(params.asking);
+  const [lotSFOverride, setLotSFOverride] = useState(params.lotSF);
+  const [hasRemainder, setHasRemainder] = useState(params.remDepth > 0);
+  const [remDepth, setRemDepth] = useState(params.remDepth || 0);
+  const [frontSB, setFrontSB] = useState(15);
+  const [sideSB, setSideSB] = useState(4);
+  const [rearSB, setRearSB] = useState(4);
+  const [driveW, setDriveW] = useState(params.driveWidth);
+  const [driveSide, setDriveSide] = useState(params.driveSide);
+  const [unitW, setUnitW] = useState(20);
+  const [unitD, setUnitD] = useState(40);
+  const [stories, setStories] = useState(3);
+  const [doubleLoaded, setDoubleLoaded] = useState(false);
+  const [units, setUnits] = useState([]);
+  const [ppsf, setPpsf] = useState(700);
+  const [hoveredUnit, setHoveredUnit] = useState(null);
+  const [dragState, setDragState] = useState(null);
+  const svgRef = useRef(null);
+  const canvasRef = useRef(null);
+
+  const cfg = useMemo(() => ({
+    lotW, lotD, street, frontSB, sideSB, rearSB, driveW, driveSide, unitW, unitD,
+    hasRemainder, remDepth, doubleLoaded, stories, lotSFOverride
+  }), [lotW, lotD, street, frontSB, sideSB, rearSB, driveW, driveSide, unitW, unitD,
+       hasRemainder, remDepth, doubleLoaded, stories, lotSFOverride]);
+
+  // Auto-layout on first load
+  useEffect(() => {
+    const initial = computeAutoLayout(cfg);
+    setUnits(initial);
+  }, []);
+
+  const runAutoLayout = useCallback(() => {
+    setUnits(computeAutoLayout(cfg));
+  }, [cfg]);
+
+  const addUnit = useCallback(() => {
+    if (units.length >= 10) return;
+    const id = units.length > 0 ? Math.max(...units.map(u => u.id)) + 1 : 1;
+    const startY = frontSB + (hasRemainder ? remDepth : 0);
+    const unitX = driveSide === 'L' ? sideSB + driveW : sideSB;
+    setUnits(prev => [...prev, { id, x: unitX, y: startY, w: unitD, h: unitW }]);
+  }, [units, frontSB, hasRemainder, remDepth, driveSide, sideSB, driveW, unitD, unitW]);
+
+  const removeUnit = useCallback((id) => {
+    setUnits(prev => prev.filter(u => u.id !== id));
+  }, []);
+
+  // ── Constraint results ──
+  const warnings = useMemo(() => checkConstraints(units, cfg), [units, cfg]);
+  const totalLotSF = lotSFOverride || lotW * lotD;
+  const devLotSF = lotW * (lotD - (hasRemainder ? remDepth : 0));
+  const unitArea = units.reduce((s, u) => s + u.w * u.h, 0);
+  const coverage = devLotSF > 0 ? (unitArea / devLotSF * 100) : 0;
+  const buildableSF = unitArea * stories;
+  const far = devLotSF > 0 ? buildableSF / devLotSF : 0;
+  const avgParcel = units.length > 0 ? devLotSF / units.length : 0;
+  const revenue = units.length * stories * unitW * unitD * ppsf;
+
+  /* ── SVG coordinate system ──────────────────────────── */
+  // We draw lot with Y=0 at top (street side by default).
+  // The SVG viewBox maps feet to SVG units 1:1 with padding.
+  const PAD = 30; // padding in feet for labels
+  const vbW = lotW + PAD * 2;
+  const vbH = lotD + PAD * 2;
+
+  // Coordinate helpers: lot origin at (PAD, PAD)
+  const ox = PAD, oy = PAD;
+
+  /* ── Drag handlers ──────────────────────────────────── */
+  const toSvgCoords = useCallback((clientX, clientY) => {
+    const svg = svgRef.current;
+    if (!svg) return { x: 0, y: 0 };
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    const ctm = svg.getScreenCTM().inverse();
+    const svgPt = pt.matrixTransform(ctm);
+    return { x: svgPt.x - ox, y: svgPt.y - oy };
+  }, [ox, oy]);
+
+  const handlePointerDown = useCallback((e, unitId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const pt = toSvgCoords(e.clientX, e.clientY);
+    const unit = units.find(u => u.id === unitId);
+    if (!unit) return;
+    setDragState({ unitId, offsetX: pt.x - unit.x, offsetY: pt.y - unit.y });
+    e.target.setPointerCapture(e.pointerId);
+  }, [units, toSvgCoords]);
+
+  const handlePointerMove = useCallback((e) => {
+    if (!dragState) return;
+    const pt = toSvgCoords(e.clientX, e.clientY);
+    let nx = Math.round(pt.x - dragState.offsetX);
+    let ny = Math.round(pt.y - dragState.offsetY);
+    // Clamp to lot bounds
+    const unit = units.find(u => u.id === dragState.unitId);
+    if (!unit) return;
+    nx = Math.max(0, Math.min(lotW - unit.w, nx));
+    ny = Math.max(0, Math.min(lotD - unit.h, ny));
+    setUnits(prev => prev.map(u => u.id === dragState.unitId ? { ...u, x: nx, y: ny } : u));
+  }, [dragState, toSvgCoords, units, lotW, lotD]);
+
+  const handlePointerUp = useCallback(() => {
+    if (!dragState) return;
+    // Snap to nearest foot (already rounded)
+    setDragState(null);
+  }, [dragState]);
+
+  /* ── Copy link ──────────────────────────────────────── */
+  const copyLink = useCallback(() => {
+    const p = new URLSearchParams();
+    p.set('width', lotW);
+    p.set('depth', lotD);
+    p.set('zone', zone);
+    p.set('street', street);
+    if (address) p.set('address', address);
+    if (asking) p.set('asking', asking);
+    if (lotSFOverride) p.set('lotSF', lotSFOverride);
+    if (hasRemainder && remDepth) p.set('remDepth', remDepth);
+    p.set('driveWidth', driveW);
+    p.set('driveSide', driveSide);
+    const url = window.location.origin + window.location.pathname + '?' + p.toString();
+    navigator.clipboard.writeText(url).then(() => alert('Link copied!'));
+  }, [lotW, lotD, zone, street, address, asking, lotSFOverride, hasRemainder, remDepth, driveW, driveSide]);
+
+  const takeScreenshot = useCallback(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    html2canvas(el, { backgroundColor: '#f5f5f5', scale: 2 }).then(canvas => {
+      const link = document.createElement('a');
+      link.download = `lot-layout-${address || 'plan'}.png`;
+      link.href = canvas.toDataURL();
+      link.click();
+    });
+  }, [address]);
+
+  /* ── Render helpers ─────────────────────────────────── */
+  const fmt = (n) => n != null ? n.toLocaleString() : '—';
+  const fmtM = (n) => n != null ? '$' + (n >= 1e6 ? (n/1e6).toFixed(2) + 'M' : n.toLocaleString()) : '—';
+
+  // Street side label position
+  const streetLabel = { N: 'top', S: 'bottom', E: 'right', W: 'left' }[street] || 'bottom';
+
+  // Remainder zone (always at the street/front side)
+  const remY = 0;
+  const devStartY = hasRemainder ? remDepth : 0;
+
+  // Driveway position
+  const driveX = driveSide === 'L' ? sideSB : lotW - sideSB - driveW;
+  const driveY = devStartY + frontSB;
+  const driveH = lotD - devStartY - frontSB - rearSB;
+
+  // Development zone bounds
+  const devZoneX = sideSB;
+  const devZoneY = devStartY + frontSB;
+  const devZoneW = lotW - 2 * sideSB;
+  const devZoneH = lotD - devStartY - frontSB - rearSB;
+
+  return (
+    <div style={{height:'100vh',display:'flex',flexDirection:'column'}}>
+      {/* Title bar */}
+      <div className="title-bar">
+        <div style={{display:'flex',alignItems:'center',gap:16}}>
+          <h1>SB 1123 Lot Layout Planner</h1>
+          <span className="brand">by Yardsworth</span>
+        </div>
+        {address && <span className="address">{address}</span>}
+        <div className="title-actions">
+          <button className="title-btn" onClick={copyLink}>Copy Link</button>
+          <button className="title-btn" onClick={takeScreenshot}>Screenshot</button>
+        </div>
+      </div>
+
+      <div className="app-layout">
+        {/* ── Sidebar ── */}
+        <div className="sidebar">
+          {/* Lot Input */}
+          <div className="section">
+            <div className="section-title">Lot Dimensions</div>
+            {address && <div className="field"><label>Address</label><input value={address} onChange={e=>setAddress(e.target.value)} /></div>}
+            <div className="field-row">
+              <div className="field">
+                <label>Width (ft)</label>
+                <input type="number" value={lotW} min={20} max={500}
+                  onChange={e=>setLotW(Math.max(1,Number(e.target.value)))} />
+              </div>
+              <div className="field">
+                <label>Depth (ft)</label>
+                <input type="number" value={lotD} min={20} max={1000}
+                  onChange={e=>setLotD(Math.max(1,Number(e.target.value)))} />
+              </div>
+            </div>
+            <div className="field">
+              <label>Street Frontage</label>
+              <div className="toggle-group">
+                {['N','S','E','W'].map(d => (
+                  <button key={d} className={`toggle-btn${street===d?' active':''}`}
+                    onClick={()=>setStreet(d)}>{d}</button>
+                ))}
+              </div>
+            </div>
+            <div className="field">
+              <label>Zone</label>
+              <select value={zone} onChange={e=>setZone(e.target.value)}>
+                {['RA','RE','R1','RD','R2','R3','R4','LAND'].map(z => (
+                  <option key={z} value={z}>{z}</option>
+                ))}
+              </select>
+            </div>
+            <div className="checkbox-field">
+              <input type="checkbox" id="rem" checked={hasRemainder}
+                onChange={e=>{setHasRemainder(e.target.checked);if(!e.target.checked)setRemDepth(0);}} />
+              <label htmlFor="rem">Existing structure (remainder parcel)</label>
+            </div>
+            {hasRemainder && (
+              <div className="field">
+                <label>Remainder depth (ft)</label>
+                <input type="number" value={remDepth} min={0} max={lotD-40}
+                  onChange={e=>setRemDepth(Math.max(0,Number(e.target.value)))} />
+              </div>
+            )}
+          </div>
+
+          {/* Development Standards */}
+          <div className="section">
+            <div className="section-title">Development Standards</div>
+            <div className="field-row">
+              <div className="field"><label>Front setback</label>
+                <input type="number" value={frontSB} min={0} max={50}
+                  onChange={e=>setFrontSB(Number(e.target.value))} /></div>
+              <div className="field"><label>Rear setback</label>
+                <input type="number" value={rearSB} min={0} max={50}
+                  onChange={e=>setRearSB(Number(e.target.value))} /></div>
+            </div>
+            <div className="field">
+              <label>Side setback</label>
+              <input type="number" value={sideSB} min={0} max={30}
+                onChange={e=>setSideSB(Number(e.target.value))} />
+            </div>
+            <div className="field-row">
+              <div className="field"><label>Driveway width</label>
+                <input type="number" value={driveW} min={16} max={28}
+                  onChange={e=>setDriveW(Number(e.target.value))} /></div>
+              <div className="field">
+                <label>Driveway side</label>
+                <div className="toggle-group">
+                  <button className={`toggle-btn${driveSide==='L'?' active':''}`}
+                    onClick={()=>setDriveSide('L')}>Left</button>
+                  <button className={`toggle-btn${driveSide==='R'?' active':''}`}
+                    onClick={()=>setDriveSide('R')}>Right</button>
+                </div>
+              </div>
+            </div>
+            <div className="field-row">
+              <div className="field"><label>Unit width (ft)</label>
+                <input type="number" value={unitW} min={16} max={26}
+                  onChange={e=>setUnitW(Number(e.target.value))} /></div>
+              <div className="field"><label>Unit depth (ft)</label>
+                <input type="number" value={unitD} min={30} max={50}
+                  onChange={e=>setUnitD(Number(e.target.value))} /></div>
+            </div>
+            <div className="field">
+              <label>Stories</label>
+              <div className="toggle-group">
+                <button className={`toggle-btn${stories===2?' active':''}`}
+                  onClick={()=>setStories(2)}>2</button>
+                <button className={`toggle-btn${stories===3?' active':''}`}
+                  onClick={()=>setStories(3)}>3</button>
+              </div>
+            </div>
+            <div className="field-row" style={{marginTop:4}}>
+              <div className="field"><label style={{color:'#999'}}>Min parcel</label>
+                <div style={{fontSize:13,fontWeight:600,color:'#666',padding:'6px 0'}}>1,200 SF</div></div>
+              <div className="field"><label style={{color:'#999'}}>Max units</label>
+                <div style={{fontSize:13,fontWeight:600,color:'#666',padding:'6px 0'}}>10</div></div>
+            </div>
+          </div>
+
+          {/* Layout controls */}
+          <div className="section">
+            <div className="section-title">Layout</div>
+            <div className="checkbox-field">
+              <input type="checkbox" id="dbl" checked={doubleLoaded}
+                onChange={e=>setDoubleLoaded(e.target.checked)} />
+              <label htmlFor="dbl">Double-loaded (central driveway)</label>
+            </div>
+            {lotW > 80 && !doubleLoaded && (
+              <div style={{fontSize:11,color:'#E65100',marginBottom:8}}>
+                Lot is {lotW}' wide — consider double-loaded layout
+              </div>
+            )}
+            <div className="action-buttons">
+              <button className="btn btn-primary" onClick={runAutoLayout}>Auto Layout</button>
+              <button className="btn" onClick={addUnit} disabled={units.length>=10}>+ Add Unit</button>
+              <button className="btn btn-danger" onClick={()=>setUnits([])}>Reset</button>
+            </div>
+          </div>
+
+          {/* Pro forma */}
+          <div className="section">
+            <div className="section-title">Pro Forma</div>
+            <div className="field">
+              <label>Exit $/SF</label>
+              <input type="number" value={ppsf} min={100} max={2000} step={25}
+                onChange={e=>setPpsf(Number(e.target.value))} />
+            </div>
+            {asking && (
+              <div className="field">
+                <label>Asking price</label>
+                <div style={{fontSize:14,fontWeight:700,color:'#1B2A4A'}}>{fmtM(asking)}</div>
+              </div>
+            )}
+            <div className="field">
+              <label>Revenue estimate</label>
+              <div style={{fontSize:14,fontWeight:700,color:'#2E7D32'}}>{fmtM(revenue)}</div>
+            </div>
+          </div>
+
+          {/* Warnings */}
+          {warnings.length > 0 && (
+            <div className="section" style={{background:'#FFF8E1'}}>
+              <div className="section-title" style={{color:'#E65100'}}>Warnings</div>
+              {warnings.map((w,i) => (
+                <div key={i} style={{fontSize:11,color:'#BF360C',marginBottom:4}}>{w}</div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── Main Canvas ── */}
+        <div className="main-area">
+          <div className="canvas-wrap" ref={canvasRef}>
+            <svg ref={svgRef} className="lot-svg" viewBox={`0 0 ${vbW} ${vbH}`}
+              preserveAspectRatio="xMidYMid meet"
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerLeave={handlePointerUp}>
+
+              {/* Grid background */}
+              <defs>
+                <pattern id="grid10" width={10} height={10} patternUnits="userSpaceOnUse"
+                  x={ox} y={oy}>
+                  <path d="M 10 0 L 0 0 0 10" fill="none" stroke="#e8e8e8" strokeWidth="0.3"/>
+                </pattern>
+                <pattern id="grid50" width={50} height={50} patternUnits="userSpaceOnUse"
+                  x={ox} y={oy}>
+                  <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#ddd" strokeWidth="0.5"/>
+                </pattern>
+              </defs>
+              <rect x={ox} y={oy} width={lotW} height={lotD} fill="url(#grid10)"/>
+              <rect x={ox} y={oy} width={lotW} height={lotD} fill="url(#grid50)"/>
+
+              {/* Lot boundary */}
+              <rect x={ox} y={oy} width={lotW} height={lotD}
+                fill="#F5F5F5" fillOpacity={0.5} stroke="#1B2A4A" strokeWidth={1.5} />
+
+              {/* Remainder parcel */}
+              {hasRemainder && remDepth > 0 && (
+                <g>
+                  <rect x={ox} y={oy} width={lotW} height={remDepth}
+                    fill="#D7CCC8" fillOpacity={0.5} stroke="#A1887F" strokeWidth={0.8}
+                    strokeDasharray="4,3" />
+                  <text x={ox + lotW/2} y={oy + remDepth/2} textAnchor="middle"
+                    dominantBaseline="middle" fontSize={Math.min(10, remDepth/3)}
+                    fill="#6D4C41" fontWeight="600" className="dim-label">
+                    Existing Home
+                  </text>
+                  {/* Remainder depth label */}
+                  <text x={ox + lotW + 6} y={oy + remDepth/2} textAnchor="start"
+                    dominantBaseline="middle" fontSize={7} fill="#795548" className="dim-label">
+                    {remDepth}'
+                  </text>
+                </g>
+              )}
+
+              {/* Development zone fill */}
+              <rect x={ox + devZoneX} y={oy + devZoneY}
+                width={Math.max(0, devZoneW)} height={Math.max(0, devZoneH)}
+                fill="white" fillOpacity={0.4} stroke="none" />
+
+              {/* Setback lines */}
+              {/* Front setback */}
+              <line x1={ox} y1={oy + devStartY + frontSB}
+                x2={ox + lotW} y2={oy + devStartY + frontSB}
+                stroke="#FF5722" strokeWidth={0.6} strokeDasharray="3,2" />
+              <text x={ox - 3} y={oy + devStartY + frontSB} textAnchor="end"
+                dominantBaseline="middle" fontSize={6} fill="#FF5722" className="dim-label">
+                {frontSB}' front
+              </text>
+
+              {/* Rear setback */}
+              <line x1={ox} y1={oy + lotD - rearSB}
+                x2={ox + lotW} y2={oy + lotD - rearSB}
+                stroke="#FF5722" strokeWidth={0.6} strokeDasharray="3,2" />
+              <text x={ox - 3} y={oy + lotD - rearSB} textAnchor="end"
+                dominantBaseline="middle" fontSize={6} fill="#FF5722" className="dim-label">
+                {rearSB}' rear
+              </text>
+
+              {/* Side setbacks */}
+              <line x1={ox + sideSB} y1={oy + devStartY}
+                x2={ox + sideSB} y2={oy + lotD}
+                stroke="#FF5722" strokeWidth={0.6} strokeDasharray="3,2" />
+              <line x1={ox + lotW - sideSB} y1={oy + devStartY}
+                x2={ox + lotW - sideSB} y2={oy + lotD}
+                stroke="#FF5722" strokeWidth={0.6} strokeDasharray="3,2" />
+
+              {/* Driveway */}
+              {driveH > 0 && (
+                <g>
+                  <rect x={ox + driveX} y={oy + driveY}
+                    width={driveW} height={Math.max(0, driveH)}
+                    fill="#D5D0CB" fillOpacity={0.7} stroke="#B0A89F" strokeWidth={0.5} />
+                  <text x={ox + driveX + driveW/2} y={oy + driveY + Math.max(0,driveH)/2}
+                    textAnchor="middle" dominantBaseline="middle"
+                    fontSize={Math.min(7, driveW/4)} fill="#6B6B6B" fontWeight="600"
+                    className="dim-label" transform={`rotate(-90, ${ox+driveX+driveW/2}, ${oy+driveY+Math.max(0,driveH)/2})`}>
+                    Driveway {driveW}'
+                  </text>
+                </g>
+              )}
+
+              {/* Yard space behind units */}
+              {units.map(u => {
+                const yardX = u.x + u.w;
+                const yardW = driveSide === 'L'
+                  ? lotW - sideSB - u.x - u.w
+                  : u.x - sideSB;
+                const yardActualX = driveSide === 'L' ? u.x + u.w : sideSB;
+                if (yardW <= 0) return null;
+                return (
+                  <rect key={`yard-${u.id}`}
+                    x={ox + yardActualX} y={oy + u.y}
+                    width={yardW} height={u.h}
+                    fill="#C8E6C9" fillOpacity={0.4} stroke="none" />
+                );
+              })}
+
+              {/* Units */}
+              {units.map(u => {
+                const isHovered = hoveredUnit === u.id;
+                const isDragging = dragState && dragState.unitId === u.id;
+                // Check if this unit has any violations
+                const minY = frontSB + (hasRemainder ? remDepth : 0);
+                const maxY = lotD - rearSB;
+                const invalid = u.x < sideSB - 0.5 || u.x + u.w > lotW - sideSB + 0.5
+                  || u.y < minY - 0.5 || u.y + u.h > maxY + 0.5;
+                return (
+                  <g key={u.id}>
+                    <rect
+                      x={ox + u.x} y={oy + u.y} width={u.w} height={u.h}
+                      fill={invalid ? '#FFCDD2' : '#3B7DD8'}
+                      fillOpacity={isHovered ? 0.9 : 0.75}
+                      stroke={invalid ? '#D32F2F' : '#2C3E6B'}
+                      strokeWidth={isHovered ? 2 : 1}
+                      rx={1}
+                      className={`unit-rect${isDragging ? ' dragging' : ''}${invalid ? ' invalid' : ''}`}
+                      onPointerDown={e => handlePointerDown(e, u.id)}
+                      onPointerEnter={() => setHoveredUnit(u.id)}
+                      onPointerLeave={() => setHoveredUnit(null)}
+                    />
+                    <text x={ox + u.x + u.w/2} y={oy + u.y + u.h/2 - 2}
+                      textAnchor="middle" dominantBaseline="middle"
+                      fontSize={Math.min(7, u.h/4)} fill="white" fontWeight="700"
+                      className="dim-label">
+                      Unit {u.id}
+                    </text>
+                    <text x={ox + u.x + u.w/2} y={oy + u.y + u.h/2 + 6}
+                      textAnchor="middle" dominantBaseline="middle"
+                      fontSize={Math.min(5, u.h/6)} fill="rgba(255,255,255,0.8)"
+                      className="dim-label">
+                      {u.w}' x {u.h}'
+                    </text>
+                    {/* Delete button on hover */}
+                    {isHovered && !isDragging && (
+                      <g style={{cursor:'pointer'}} onClick={() => removeUnit(u.id)}>
+                        <circle cx={ox + u.x + u.w - 3} cy={oy + u.y + 3} r={4}
+                          fill="#D32F2F" />
+                        <text x={ox + u.x + u.w - 3} y={oy + u.y + 3.5}
+                          textAnchor="middle" dominantBaseline="middle"
+                          fontSize={5} fill="white" fontWeight="700">x</text>
+                      </g>
+                    )}
+                  </g>
+                );
+              })}
+
+              {/* Street label */}
+              {streetLabel === 'bottom' && (
+                <g>
+                  <rect x={ox} y={oy + lotD + 2} width={lotW} height={12}
+                    fill="#6B6B6B" rx={1} />
+                  <text x={ox + lotW/2} y={oy + lotD + 9} textAnchor="middle"
+                    fontSize={6} fill="white" fontWeight="600" className="dim-label">
+                    STREET
+                  </text>
+                </g>
+              )}
+              {streetLabel === 'top' && (
+                <g>
+                  <rect x={ox} y={oy - 14} width={lotW} height={12}
+                    fill="#6B6B6B" rx={1} />
+                  <text x={ox + lotW/2} y={oy - 7} textAnchor="middle"
+                    fontSize={6} fill="white" fontWeight="600" className="dim-label">
+                    STREET
+                  </text>
+                </g>
+              )}
+              {streetLabel === 'left' && (
+                <g>
+                  <rect x={ox - 14} y={oy} width={12} height={lotD}
+                    fill="#6B6B6B" rx={1} />
+                  <text x={ox - 8} y={oy + lotD/2} textAnchor="middle"
+                    fontSize={6} fill="white" fontWeight="600" className="dim-label"
+                    transform={`rotate(-90, ${ox-8}, ${oy+lotD/2})`}>
+                    STREET
+                  </text>
+                </g>
+              )}
+              {streetLabel === 'right' && (
+                <g>
+                  <rect x={ox + lotW + 2} y={oy} width={12} height={lotD}
+                    fill="#6B6B6B" rx={1} />
+                  <text x={ox + lotW + 8} y={oy + lotD/2} textAnchor="middle"
+                    fontSize={6} fill="white" fontWeight="600" className="dim-label"
+                    transform={`rotate(90, ${ox+lotW+8}, ${oy+lotD/2})`}>
+                    STREET
+                  </text>
+                </g>
+              )}
+
+              {/* Dimension labels */}
+              {/* Lot width - top */}
+              <g>
+                <line x1={ox} y1={oy - 18} x2={ox + lotW} y2={oy - 18}
+                  stroke="#1B2A4A" strokeWidth={0.5} markerStart="url(#arrowL)" markerEnd="url(#arrowR)" />
+                <line x1={ox} y1={oy - 20} x2={ox} y2={oy - 16} stroke="#1B2A4A" strokeWidth={0.5} />
+                <line x1={ox+lotW} y1={oy - 20} x2={ox+lotW} y2={oy - 16} stroke="#1B2A4A" strokeWidth={0.5} />
+                <text x={ox + lotW/2} y={oy - 20} textAnchor="middle" fontSize={7}
+                  fill="#1B2A4A" fontWeight="600" className="dim-label">{lotW}'</text>
+              </g>
+              {/* Lot depth - right */}
+              <g>
+                <line x1={ox + lotW + 18} y1={oy} x2={ox + lotW + 18} y2={oy + lotD}
+                  stroke="#1B2A4A" strokeWidth={0.5} />
+                <line x1={ox + lotW + 16} y1={oy} x2={ox + lotW + 20} y2={oy} stroke="#1B2A4A" strokeWidth={0.5} />
+                <line x1={ox + lotW + 16} y1={oy+lotD} x2={ox + lotW + 20} y2={oy+lotD} stroke="#1B2A4A" strokeWidth={0.5} />
+                <text x={ox + lotW + 22} y={oy + lotD/2} textAnchor="start"
+                  dominantBaseline="middle" fontSize={7}
+                  fill="#1B2A4A" fontWeight="600" className="dim-label">{lotD}'</text>
+              </g>
+
+              {/* Scale bar */}
+              <g>
+                {(() => {
+                  const scaleLen = lotW > 200 ? 50 : lotW > 100 ? 20 : 10;
+                  const bx = ox + 4, by = oy + lotD + (streetLabel === 'bottom' ? 20 : 6);
+                  return (
+                    <>
+                      <rect x={bx} y={by} width={scaleLen} height={2} fill="#1B2A4A" />
+                      <line x1={bx} y1={by-1} x2={bx} y2={by+3} stroke="#1B2A4A" strokeWidth={0.5} />
+                      <line x1={bx+scaleLen} y1={by-1} x2={bx+scaleLen} y2={by+3} stroke="#1B2A4A" strokeWidth={0.5} />
+                      <text x={bx + scaleLen/2} y={by+7} textAnchor="middle" fontSize={5}
+                        fill="#666" className="dim-label">{scaleLen} ft</text>
+                    </>
+                  );
+                })()}
+              </g>
+
+              {/* North arrow */}
+              <g transform={`translate(${ox + lotW + 18}, ${oy + lotD - 10})`}>
+                <line x1={0} y1={10} x2={0} y2={0} stroke="#1B2A4A" strokeWidth={1} />
+                <polygon points="-3,4 0,0 3,4" fill="#1B2A4A" />
+                <text x={0} y={-3} textAnchor="middle" fontSize={6} fill="#1B2A4A"
+                  fontWeight="700" className="dim-label">N</text>
+              </g>
+
+              {/* Hover tooltip */}
+              {hoveredUnit && (() => {
+                const u = units.find(u => u.id === hoveredUnit);
+                if (!u) return null;
+                const tx = ox + u.x + u.w + 5;
+                const ty = oy + u.y;
+                return (
+                  <g className="tooltip-box">
+                    <rect x={tx} y={ty} width={52} height={32} fill="white"
+                      stroke="#ccc" strokeWidth={0.5} rx={2} />
+                    <text x={tx+4} y={ty+10} fontSize={5} fill="#333" className="dim-label">
+                      Unit {u.id}: {u.w}' x {u.h}'
+                    </text>
+                    <text x={tx+4} y={ty+18} fontSize={5} fill="#666" className="dim-label">
+                      Footprint: {fmt(u.w * u.h)} SF
+                    </text>
+                    <text x={tx+4} y={ty+26} fontSize={5} fill="#666" className="dim-label">
+                      Habitable: {fmt(u.w * u.h * stories)} SF
+                    </text>
+                  </g>
+                );
+              })()}
+            </svg>
+          </div>
+
+          {/* ── Stats bar ── */}
+          <div className="stats-bar">
+            <div className="stats-grid">
+              <div className="stat">
+                <span className="stat-label">Lot</span>
+                <span className="stat-value">{fmt(totalLotSF)} SF</span>
+              </div>
+              <div className="stat-sep" />
+              <div className="stat">
+                <span className="stat-label">Dev Area</span>
+                <span className="stat-value">{fmt(devLotSF)} SF</span>
+              </div>
+              <div className="stat-sep" />
+              <div className="stat">
+                <span className="stat-label">Units</span>
+                <span className={`stat-value${units.length>10?' warn':''}`}>
+                  {units.length} / 10
+                </span>
+              </div>
+              <div className="stat-sep" />
+              <div className="stat">
+                <span className="stat-label">Avg Parcel</span>
+                <span className={`stat-value${avgParcel>0&&avgParcel<1200?' warn':''}`}>
+                  {units.length > 0 ? fmt(Math.round(avgParcel)) + ' SF' : '—'}
+                </span>
+              </div>
+              <div className="stat-sep" />
+              <div className="stat">
+                <span className="stat-label">Coverage</span>
+                <span className="stat-value">{coverage.toFixed(1)}%</span>
+              </div>
+              <div className="stat-sep" />
+              <div className="stat">
+                <span className="stat-label">Buildable</span>
+                <span className="stat-value">{fmt(buildableSF)} SF</span>
+              </div>
+              <div className="stat-sep" />
+              <div className="stat">
+                <span className="stat-label">FAR</span>
+                <span className="stat-value">{far.toFixed(2)}</span>
+              </div>
+              <div className="stat-sep" />
+              <div className={`compliance-badge ${warnings.length === 0 ? 'pass' : 'fail'}`}>
+                {warnings.length === 0 ? '\u2713 Compliant' : `\u2717 ${warnings.length} issue${warnings.length>1?'s':''}`}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

@@ -180,9 +180,9 @@ function checkConstraints(units, cfg) {
       if (rectsOverlap(units[i], units[j]))
         warnings.push(`Unit ${units[i].id} overlaps Unit ${units[j].id}`);
 
-  // Avg habitable size
+  // Avg habitable size (exclude garage on 1st floor)
   if (units.length > 0) {
-    const avgHab = (unitArea * stories) / units.length;
+    const avgHab = (unitArea * (stories - 1)) / units.length;
     if (avgHab > 1750) warnings.push(`Avg unit ${Math.round(avgHab)} SF > 1,750 SF habitable max`);
   }
   return warnings;
@@ -274,10 +274,12 @@ function App() {
   const devLotSF = lotW * (lotD - devStartY);
   const unitArea = units.reduce((s, u) => s + u.w * u.h, 0);
   const coverage = devLotSF > 0 ? (unitArea / devLotSF * 100) : 0;
-  const buildableSF = unitArea * stories;
-  const far = devLotSF > 0 ? buildableSF / devLotSF : 0;
+  const garageSF = unitArea; // entire 1st floor is garage
+  const habitableSF = unitArea * (stories - 1); // upper floors only
+  const totalBuildSF = unitArea * stories; // all floors (for FAR)
+  const far = devLotSF > 0 ? totalBuildSF / devLotSF : 0;
   const avgParcel = units.length > 0 ? devLotSF / units.length : 0;
-  const revenue = units.reduce((sum, u) => sum + u.w * u.h * stories * ppsf, 0);
+  const revenue = units.reduce((sum, u) => sum + u.w * u.h * (stories - 1) * ppsf, 0);
 
   /* ── SVG coordinate system ──────────────────────────── */
   const PAD = 30;
@@ -846,18 +848,31 @@ function App() {
                       style={{ cursor: isMoving ? 'grabbing' : 'grab' }}
                       onPointerDown={e => startUnitMove(e, u.id)}
                     />
+                    {/* Garage outline (1st floor) */}
+                    <rect
+                      x={ox + u.x + 1.5} y={oy + u.y + 1.5}
+                      width={u.w - 3} height={u.h - 3}
+                      fill="rgba(0,0,0,0.1)" stroke="rgba(255,255,255,0.45)"
+                      strokeWidth={0.5} strokeDasharray="2,1.5" rx={0.5}
+                      style={{ pointerEvents: 'none' }} />
                     {/* Unit label */}
-                    <text x={ox + u.x + u.w/2} y={oy + u.y + u.h/2 - 2}
+                    <text x={ox + u.x + u.w/2} y={oy + u.y + u.h/2 - 5}
                       textAnchor="middle" dominantBaseline="middle"
                       fontSize={Math.min(7, Math.min(u.w, u.h)/4)} fill="white" fontWeight="700"
                       className="dim-label">
                       Unit {u.id}
                     </text>
-                    <text x={ox + u.x + u.w/2} y={oy + u.y + u.h/2 + 5}
+                    <text x={ox + u.x + u.w/2} y={oy + u.y + u.h/2 + 2}
                       textAnchor="middle" dominantBaseline="middle"
                       fontSize={Math.min(5, Math.min(u.w, u.h)/6)} fill="rgba(255,255,255,0.85)"
                       className="dim-label">
                       {u.w}' x {u.h}'
+                    </text>
+                    <text x={ox + u.x + u.w/2} y={oy + u.y + u.h/2 + 9}
+                      textAnchor="middle" dominantBaseline="middle"
+                      fontSize={Math.min(4, Math.min(u.w, u.h)/7)} fill="rgba(255,255,255,0.6)"
+                      className="dim-label">
+                      Garage {fmt(u.w * u.h)} SF
                     </text>
 
                     {/* Resize handles (shown on hover or during resize of this unit) */}
@@ -962,18 +977,21 @@ function App() {
                 const ty = oy + u.y;
                 return (
                   <g className="tooltip-box">
-                    <rect x={tx} y={ty} width={56} height={38} fill="white"
+                    <rect x={tx} y={ty} width={62} height={46} fill="white"
                       stroke="#ccc" strokeWidth={0.5} rx={2} />
-                    <text x={tx+4} y={ty+10} fontSize={5} fill="#333" className="dim-label">
+                    <text x={tx+4} y={ty+9} fontSize={5} fill="#333" className="dim-label">
                       Unit {u.id}: {u.w}' x {u.h}'
                     </text>
-                    <text x={tx+4} y={ty+18} fontSize={5} fill="#666" className="dim-label">
-                      Footprint: {fmt(u.w * u.h)} SF
+                    <text x={tx+4} y={ty+17} fontSize={5} fill="#666" className="dim-label">
+                      Garage (1F): {fmt(u.w * u.h)} SF
                     </text>
-                    <text x={tx+4} y={ty+26} fontSize={5} fill="#666" className="dim-label">
-                      Habitable: {fmt(u.w * u.h * stories)} SF
+                    <text x={tx+4} y={ty+25} fontSize={5} fill="#666" className="dim-label">
+                      Habitable: {fmt(u.w * u.h * (stories - 1))} SF
                     </text>
-                    <text x={tx+4} y={ty+34} fontSize={4.5} fill="#999" className="dim-label">
+                    <text x={tx+4} y={ty+33} fontSize={5} fill="#999" className="dim-label">
+                      Total: {fmt(u.w * u.h * stories)} SF ({stories}F)
+                    </text>
+                    <text x={tx+4} y={ty+41} fontSize={4.5} fill="#aaa" className="dim-label">
                       Drag edges to resize
                     </text>
                   </g>
@@ -1015,8 +1033,8 @@ function App() {
               </div>
               <div className="stat-sep" />
               <div className="stat">
-                <span className="stat-label">Buildable</span>
-                <span className="stat-value">{fmt(buildableSF)} SF</span>
+                <span className="stat-label">Habitable</span>
+                <span className="stat-value">{fmt(habitableSF)} SF</span>
               </div>
               <div className="stat-sep" />
               <div className="stat">

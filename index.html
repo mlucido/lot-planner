@@ -12,13 +12,11 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #fafafa; color: #333; height: 100vh; overflow: hidden; }
 
-/* Title bar */
 .title-bar { display: flex; align-items: center; justify-content: space-between; background: #1B2A4A; color: white; padding: 10px 20px; height: 48px; flex-shrink: 0; }
 .title-bar h1 { font-size: 16px; font-weight: 600; letter-spacing: 0.3px; }
 .title-bar .brand { font-size: 13px; color: #8DA4C8; font-weight: 500; }
 .title-bar .address { font-size: 13px; color: #B8CCE8; font-weight: 400; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Main layout */
 .app-layout { display: flex; height: calc(100vh - 48px); }
 .sidebar { width: 288px; min-width: 288px; background: white; border-right: 1px solid #e0e0e0; overflow-y: auto; flex-shrink: 0; }
 .sidebar::-webkit-scrollbar { width: 6px; }
@@ -27,7 +25,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .canvas-wrap { flex: 1; position: relative; overflow: hidden; background: #f5f5f5; }
 .stats-bar { background: white; border-top: 1px solid #e0e0e0; padding: 10px 16px; flex-shrink: 0; }
 
-/* Sidebar sections */
 .section { padding: 12px 16px; border-bottom: 1px solid #eee; }
 .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #1B2A4A; margin-bottom: 10px; }
 .field { margin-bottom: 8px; }
@@ -50,9 +47,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .btn-primary:hover { background: #2C6BC0; }
 .btn-danger { color: #D32F2F; border-color: #D32F2F; }
 .btn-danger:hover { background: #FFEBEE; }
-.btn-sm { padding: 4px 8px; font-size: 10px; }
 
-/* Stats bar */
 .stats-grid { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; }
 .stat { display: flex; align-items: baseline; gap: 4px; }
 .stat-label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
@@ -64,23 +59,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .compliance-badge.pass { background: #E8F5E9; color: #2E7D32; }
 .compliance-badge.fail { background: #FFEBEE; color: #D32F2F; }
 
-/* SVG canvas styles */
-.lot-svg { width: 100%; height: 100%; }
-.unit-rect { cursor: grab; transition: opacity 0.1s; }
-.unit-rect:hover { opacity: 0.85; }
-.unit-rect.dragging { cursor: grabbing; opacity: 0.7; }
-.unit-rect.invalid { stroke: #D32F2F !important; stroke-width: 3 !important; }
-.driveway-rect { cursor: ew-resize; }
-.setback-line { cursor: ns-resize; }
-.dim-label { font-family: -apple-system, BlinkMacSystemFont, sans-serif; pointer-events: none; }
+.lot-svg { width: 100%; height: 100%; touch-action: none; }
+.dim-label { font-family: -apple-system, BlinkMacSystemFont, sans-serif; pointer-events: none; user-select: none; }
 .tooltip-box { pointer-events: none; }
 
-/* Export buttons in title bar */
 .title-actions { display: flex; gap: 8px; align-items: center; }
 .title-btn { padding: 4px 12px; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; background: transparent; color: white; font-size: 12px; cursor: pointer; font-weight: 500; }
 .title-btn:hover { background: rgba(255,255,255,0.1); }
 
-/* Responsive */
 @media (max-width: 900px) {
   .sidebar { width: 240px; min-width: 240px; }
 }
@@ -95,7 +81,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
-/* ── URL params ────────────────────────────────────────── */
+/* ── Helpers ───────────────────────────────────────────── */
 function readParams() {
   const p = new URLSearchParams(window.location.search);
   return {
@@ -112,68 +98,68 @@ function readParams() {
   };
 }
 
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
 /* ── Auto-layout engine ────────────────────────────────── */
 function computeAutoLayout(cfg) {
-  const { lotW, lotD, street, frontSB, sideSB, rearSB, driveW, driveSide, unitW, unitD,
+  const { lotW, lotD, frontSB, sideSB, rearSB, driveW, driveX, unitW, unitD,
           hasRemainder, remDepth, doubleLoaded } = cfg;
-  // Buildable zone after setbacks
-  const useW = lotW - 2 * sideSB;
-  const useD = lotD - frontSB - rearSB - (hasRemainder ? remDepth : 0);
-  if (useW <= 0 || useD <= 0) return [];
+  const devD = lotD - frontSB - rearSB - (hasRemainder ? remDepth : 0);
+  if (devD <= 0) return { units: [], driveX };
 
   const units = [];
+  let newDriveX = driveX;
+  const startY = frontSB + (hasRemainder ? remDepth : 0);
+
   if (doubleLoaded) {
-    // Central driveway, units on both sides
-    const rowW = (useW - driveW) / 2;
-    const unitsPerRow = Math.max(0, Math.floor(useD / unitW));
-    const leftX = sideSB;
-    const rightX = sideSB + rowW + driveW;
-    const startY = frontSB + (hasRemainder ? remDepth : 0);
+    newDriveX = Math.round((lotW - driveW) / 2);
+    const leftW = newDriveX;
+    const rightW = lotW - newDriveX - driveW;
+    const perRow = Math.max(0, Math.floor(devD / unitW));
     let id = 1;
-    for (let i = 0; i < unitsPerRow && id <= 10; i++) {
-      units.push({ id: id++, x: leftX, y: startY + i * unitW, w: Math.min(unitD, rowW), h: unitW });
-    }
-    for (let i = 0; i < unitsPerRow && id <= 10; i++) {
-      units.push({ id: id++, x: rightX, y: startY + i * unitW, w: Math.min(unitD, rowW), h: unitW });
-    }
+    for (let i = 0; i < perRow && id <= 10; i++)
+      units.push({ id: id++, x: 0, y: startY + i * unitW, w: Math.min(unitD, leftW), h: unitW });
+    for (let i = 0; i < perRow && id <= 10; i++)
+      units.push({ id: id++, x: newDriveX + driveW, y: startY + i * unitW, w: Math.min(unitD, rightW), h: unitW });
   } else {
-    // Single-loaded: one row adjacent to driveway
-    const availW = useW - driveW;
-    if (availW < unitD) return [];
-    const unitsPerRow = Math.max(0, Math.floor(useD / unitW));
-    const startY = frontSB + (hasRemainder ? remDepth : 0);
-    const unitX = driveSide === 'L' ? sideSB + driveW : sideSB;
+    const isLeft = driveX <= lotW / 2;
+    newDriveX = isLeft ? sideSB : lotW - sideSB - driveW;
+    const unitX = isLeft ? sideSB + driveW : sideSB;
+    const availW = lotW - 2 * sideSB - driveW;
+    if (availW < 12) return { units: [], driveX: newDriveX };
+    const perRow = Math.max(0, Math.floor(devD / unitW));
     let id = 1;
-    for (let i = 0; i < unitsPerRow && id <= 10; i++) {
+    for (let i = 0; i < perRow && id <= 10; i++)
       units.push({ id: id++, x: unitX, y: startY + i * unitW, w: Math.min(unitD, availW), h: unitW });
-    }
   }
-  return units;
+  return { units, driveX: newDriveX };
 }
 
 /* ── Constraint checks ─────────────────────────────────── */
 function checkConstraints(units, cfg) {
-  const { lotW, lotD, frontSB, sideSB, rearSB, hasRemainder, remDepth, driveW,
-          driveSide, doubleLoaded, stories, lotSFOverride } = cfg;
+  const { lotW, lotD, frontSB, sideSB, rearSB, hasRemainder, remDepth,
+          driveX, driveW, stories, lotSFOverride } = cfg;
   const warnings = [];
   if (units.length > 10) warnings.push('Unit count exceeds 10 maximum');
-  const devArea = lotW * (lotD - (hasRemainder ? remDepth : 0));
-  const totalLotSF = lotSFOverride || lotW * lotD;
+
+  const devStartY = hasRemainder ? remDepth : 0;
+  const devArea = lotW * (lotD - devStartY);
   if (units.length > 0) {
     const parcelSize = devArea / units.length;
     if (parcelSize < 1200) warnings.push(`Avg parcel ${Math.round(parcelSize)} SF < 1,200 SF minimum`);
   }
   const unitArea = units.reduce((s, u) => s + u.w * u.h, 0);
-  const coverage = devArea > 0 ? unitArea / devArea : 0;
   const buildableSF = unitArea * stories;
   const far = devArea > 0 ? buildableSF / devArea : 0;
-  // FAR limits by unit count
   let farLimit = 0.5;
   if (units.length >= 8) farLimit = 1.25;
   else if (units.length >= 3) farLimit = 1.0;
   if (far > farLimit) warnings.push(`FAR ${far.toFixed(2)} exceeds ${farLimit} limit for ${units.length} units`);
-  // Check individual unit placement
-  const minY = frontSB + (hasRemainder ? remDepth : 0);
+
+  // Setback violations
+  const minY = frontSB + devStartY;
   const maxY = lotD - rearSB;
   units.forEach(u => {
     if (u.x < sideSB - 0.5) warnings.push(`Unit ${u.id}: side setback violation (left)`);
@@ -181,7 +167,20 @@ function checkConstraints(units, cfg) {
     if (u.y < minY - 0.5) warnings.push(`Unit ${u.id}: front setback violation`);
     if (u.y + u.h > maxY + 0.5) warnings.push(`Unit ${u.id}: rear setback violation`);
   });
-  // Avg unit habitable size
+
+  // Driveway overlap
+  const driveRect = { x: driveX, y: devStartY + frontSB, w: driveW, h: lotD - devStartY - frontSB - rearSB };
+  units.forEach(u => {
+    if (rectsOverlap(u, driveRect)) warnings.push(`Unit ${u.id}: overlaps driveway`);
+  });
+
+  // Unit-unit overlap
+  for (let i = 0; i < units.length; i++)
+    for (let j = i + 1; j < units.length; j++)
+      if (rectsOverlap(units[i], units[j]))
+        warnings.push(`Unit ${units[i].id} overlaps Unit ${units[j].id}`);
+
+  // Avg habitable size
   if (units.length > 0) {
     const avgHab = (unitArea * stories) / units.length;
     if (avgHab > 1750) warnings.push(`Avg unit ${Math.round(avgHab)} SF > 1,750 SF habitable max`);
@@ -192,81 +191,105 @@ function checkConstraints(units, cfg) {
 /* ── Main App ──────────────────────────────────────────── */
 function App() {
   const params = useMemo(readParams, []);
+
+  // Lot state
   const [lotW, setLotW] = useState(params.width);
   const [lotD, setLotD] = useState(params.depth);
   const [zone, setZone] = useState(params.zone);
   const [street, setStreet] = useState(params.street);
   const [address, setAddress] = useState(params.address);
-  const [asking, setAsking] = useState(params.asking);
-  const [lotSFOverride, setLotSFOverride] = useState(params.lotSF);
+  const [asking] = useState(params.asking);
+  const [lotSFOverride] = useState(params.lotSF);
   const [hasRemainder, setHasRemainder] = useState(params.remDepth > 0);
   const [remDepth, setRemDepth] = useState(params.remDepth || 0);
+
+  // Standards
   const [frontSB, setFrontSB] = useState(15);
   const [sideSB, setSideSB] = useState(4);
   const [rearSB, setRearSB] = useState(4);
-  const [driveW, setDriveW] = useState(params.driveWidth);
-  const [driveSide, setDriveSide] = useState(params.driveSide);
-  const [unitW, setUnitW] = useState(20);
-  const [unitD, setUnitD] = useState(40);
   const [stories, setStories] = useState(3);
+
+  // Driveway — absolute position + width
+  const initDriveX = params.driveSide === 'R' ? params.width - 4 - params.driveWidth : 4;
+  const [driveX, setDriveX] = useState(initDriveX);
+  const [driveW, setDriveW] = useState(params.driveWidth);
+
+  // Unit defaults (for new units only)
+  const [defUnitW, setDefUnitW] = useState(20);
+  const [defUnitD, setDefUnitD] = useState(40);
+
+  // Layout
   const [doubleLoaded, setDoubleLoaded] = useState(false);
   const [units, setUnits] = useState([]);
   const [ppsf, setPpsf] = useState(700);
+
+  // Interaction
   const [hoveredUnit, setHoveredUnit] = useState(null);
-  const [dragState, setDragState] = useState(null);
+  const [hoveredDrive, setHoveredDrive] = useState(false);
+  const [dragInfo, setDragInfo] = useState(null); // { type, unitId?, edge? } for UI
+  const dragRef = useRef(null); // full drag data
   const svgRef = useRef(null);
   const canvasRef = useRef(null);
 
   const cfg = useMemo(() => ({
-    lotW, lotD, street, frontSB, sideSB, rearSB, driveW, driveSide, unitW, unitD,
-    hasRemainder, remDepth, doubleLoaded, stories, lotSFOverride
-  }), [lotW, lotD, street, frontSB, sideSB, rearSB, driveW, driveSide, unitW, unitD,
-       hasRemainder, remDepth, doubleLoaded, stories, lotSFOverride]);
+    lotW, lotD, street, frontSB, sideSB, rearSB, driveW, driveX,
+    unitW: defUnitW, unitD: defUnitD, hasRemainder, remDepth, doubleLoaded, stories, lotSFOverride
+  }), [lotW, lotD, street, frontSB, sideSB, rearSB, driveW, driveX,
+       defUnitW, defUnitD, hasRemainder, remDepth, doubleLoaded, stories, lotSFOverride]);
 
   // Auto-layout on first load
   useEffect(() => {
-    const initial = computeAutoLayout(cfg);
-    setUnits(initial);
+    const result = computeAutoLayout(cfg);
+    setUnits(result.units);
+    setDriveX(result.driveX);
   }, []);
 
   const runAutoLayout = useCallback(() => {
-    setUnits(computeAutoLayout(cfg));
+    const result = computeAutoLayout(cfg);
+    setUnits(result.units);
+    setDriveX(result.driveX);
   }, [cfg]);
 
   const addUnit = useCallback(() => {
     if (units.length >= 10) return;
     const id = units.length > 0 ? Math.max(...units.map(u => u.id)) + 1 : 1;
     const startY = frontSB + (hasRemainder ? remDepth : 0);
-    const unitX = driveSide === 'L' ? sideSB + driveW : sideSB;
-    setUnits(prev => [...prev, { id, x: unitX, y: startY, w: unitD, h: unitW }]);
-  }, [units, frontSB, hasRemainder, remDepth, driveSide, sideSB, driveW, unitD, unitW]);
+    // Place next to driveway
+    const unitX = driveX + driveW;
+    setUnits(prev => [...prev, { id, x: unitX, y: startY, w: defUnitD, h: defUnitW }]);
+  }, [units, frontSB, hasRemainder, remDepth, driveX, driveW, defUnitD, defUnitW]);
 
   const removeUnit = useCallback((id) => {
     setUnits(prev => prev.filter(u => u.id !== id));
   }, []);
 
-  // ── Constraint results ──
+  // Snap driveway to edges
+  const snapDriveLeft = useCallback(() => setDriveX(0), []);
+  const snapDriveRight = useCallback(() => setDriveX(Math.max(0, lotW - driveW)), [lotW, driveW]);
+
+  /* ── Computed stats ──────────────────────────────────── */
   const warnings = useMemo(() => checkConstraints(units, cfg), [units, cfg]);
   const totalLotSF = lotSFOverride || lotW * lotD;
-  const devLotSF = lotW * (lotD - (hasRemainder ? remDepth : 0));
+  const devStartY = hasRemainder ? remDepth : 0;
+  const devLotSF = lotW * (lotD - devStartY);
   const unitArea = units.reduce((s, u) => s + u.w * u.h, 0);
   const coverage = devLotSF > 0 ? (unitArea / devLotSF * 100) : 0;
   const buildableSF = unitArea * stories;
   const far = devLotSF > 0 ? buildableSF / devLotSF : 0;
   const avgParcel = units.length > 0 ? devLotSF / units.length : 0;
-  const revenue = units.length * stories * unitW * unitD * ppsf;
+  const revenue = units.reduce((sum, u) => sum + u.w * u.h * stories * ppsf, 0);
 
   /* ── SVG coordinate system ──────────────────────────── */
-  // We draw lot with Y=0 at top (street side by default).
-  // The SVG viewBox maps feet to SVG units 1:1 with padding.
-  const PAD = 30; // padding in feet for labels
+  const PAD = 30;
   const vbW = lotW + PAD * 2;
   const vbH = lotD + PAD * 2;
-
-  // Coordinate helpers: lot origin at (PAD, PAD)
   const ox = PAD, oy = PAD;
 
-  /* ── Drag handlers ──────────────────────────────────── */
+  // Driveway rect (derived)
+  const driveY = devStartY + frontSB;
+  const driveH = Math.max(0, lotD - devStartY - frontSB - rearSB);
+
+  /* ── Drag system ─────────────────────────────────────── */
   const toSvgCoords = useCallback((clientX, clientY) => {
     const svg = svgRef.current;
     if (!svg) return { x: 0, y: 0 };
@@ -278,51 +301,146 @@ function App() {
     return { x: svgPt.x - ox, y: svgPt.y - oy };
   }, [ox, oy]);
 
-  const handlePointerDown = useCallback((e, unitId) => {
-    e.preventDefault();
-    e.stopPropagation();
+  // Pointer down: start drag
+  const startUnitMove = useCallback((e, unitId) => {
+    e.preventDefault(); e.stopPropagation();
     const pt = toSvgCoords(e.clientX, e.clientY);
     const unit = units.find(u => u.id === unitId);
     if (!unit) return;
-    setDragState({ unitId, offsetX: pt.x - unit.x, offsetY: pt.y - unit.y });
-    e.target.setPointerCapture(e.pointerId);
+    dragRef.current = {
+      type: 'unit-move', unitId,
+      offsetX: pt.x - unit.x, offsetY: pt.y - unit.y,
+      w: unit.w, h: unit.h
+    };
+    setDragInfo({ type: 'unit-move', unitId });
+    svgRef.current?.setPointerCapture(e.pointerId);
   }, [units, toSvgCoords]);
 
-  const handlePointerMove = useCallback((e) => {
-    if (!dragState) return;
+  const startUnitResize = useCallback((e, unitId, edge) => {
+    e.preventDefault(); e.stopPropagation();
     const pt = toSvgCoords(e.clientX, e.clientY);
-    let nx = Math.round(pt.x - dragState.offsetX);
-    let ny = Math.round(pt.y - dragState.offsetY);
-    // Clamp to lot bounds
-    const unit = units.find(u => u.id === dragState.unitId);
+    const unit = units.find(u => u.id === unitId);
     if (!unit) return;
-    nx = Math.max(0, Math.min(lotW - unit.w, nx));
-    ny = Math.max(0, Math.min(lotD - unit.h, ny));
-    setUnits(prev => prev.map(u => u.id === dragState.unitId ? { ...u, x: nx, y: ny } : u));
-  }, [dragState, toSvgCoords, units, lotW, lotD]);
+    dragRef.current = {
+      type: 'unit-resize', unitId, edge,
+      startRect: { x: unit.x, y: unit.y, w: unit.w, h: unit.h },
+      startPt: { x: pt.x, y: pt.y }
+    };
+    setDragInfo({ type: 'unit-resize', unitId, edge });
+    svgRef.current?.setPointerCapture(e.pointerId);
+  }, [units, toSvgCoords]);
 
-  const handlePointerUp = useCallback(() => {
-    if (!dragState) return;
-    // Snap to nearest foot (already rounded)
-    setDragState(null);
-  }, [dragState]);
+  const startDriveMove = useCallback((e) => {
+    e.preventDefault(); e.stopPropagation();
+    const pt = toSvgCoords(e.clientX, e.clientY);
+    dragRef.current = {
+      type: 'drive-move',
+      offsetX: pt.x - driveX, w: driveW
+    };
+    setDragInfo({ type: 'drive-move' });
+    svgRef.current?.setPointerCapture(e.pointerId);
+  }, [toSvgCoords, driveX, driveW]);
+
+  const startDriveResize = useCallback((e, edge) => {
+    e.preventDefault(); e.stopPropagation();
+    const pt = toSvgCoords(e.clientX, e.clientY);
+    dragRef.current = {
+      type: 'drive-resize', edge,
+      startRect: { x: driveX, w: driveW },
+      startPt: { x: pt.x }
+    };
+    setDragInfo({ type: 'drive-resize', edge });
+    svgRef.current?.setPointerCapture(e.pointerId);
+  }, [toSvgCoords, driveX, driveW]);
+
+  // Pointer move: update positions
+  const handlePointerMove = useCallback((e) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const pt = toSvgCoords(e.clientX, e.clientY);
+
+    if (drag.type === 'unit-move') {
+      let nx = Math.round(pt.x - drag.offsetX);
+      let ny = Math.round(pt.y - drag.offsetY);
+      nx = Math.max(0, Math.min(lotW - drag.w, nx));
+      ny = Math.max(0, Math.min(lotD - drag.h, ny));
+      setUnits(prev => prev.map(u => u.id === drag.unitId ? { ...u, x: nx, y: ny } : u));
+    }
+    else if (drag.type === 'unit-resize') {
+      const dx = Math.round(pt.x - drag.startPt.x);
+      const dy = Math.round(pt.y - drag.startPt.y);
+      let { x, y, w, h } = { ...drag.startRect };
+
+      if (drag.edge === 'right') w = drag.startRect.w + dx;
+      else if (drag.edge === 'left') { x = drag.startRect.x + dx; w = drag.startRect.w - dx; }
+      else if (drag.edge === 'bottom') h = drag.startRect.h + dy;
+      else if (drag.edge === 'top') { y = drag.startRect.y + dy; h = drag.startRect.h - dy; }
+
+      // Enforce minimums (12' each dimension)
+      if (w < 12 || h < 12) return;
+      // Clamp to lot
+      if (x < 0) return;
+      if (y < 0) return;
+      if (x + w > lotW) return;
+      if (y + h > lotD) return;
+
+      const newRect = { x, y, w, h };
+      const dr = { x: driveX, y: driveY, w: driveW, h: driveH };
+
+      setUnits(prev => {
+        // Check collisions with other units
+        for (const other of prev) {
+          if (other.id === drag.unitId) continue;
+          if (rectsOverlap(newRect, other)) return prev;
+        }
+        // Check collision with driveway
+        if (rectsOverlap(newRect, dr)) return prev;
+        return prev.map(u => u.id === drag.unitId ? { ...u, ...newRect } : u);
+      });
+    }
+    else if (drag.type === 'drive-move') {
+      let nx = Math.round(pt.x - drag.offsetX);
+      nx = Math.max(0, Math.min(lotW - drag.w, nx));
+      setDriveX(nx);
+    }
+    else if (drag.type === 'drive-resize') {
+      const dx = Math.round(pt.x - drag.startPt.x);
+      let x = drag.startRect.x;
+      let w = drag.startRect.w;
+
+      if (drag.edge === 'right') { w = drag.startRect.w + dx; }
+      else if (drag.edge === 'left') { x = drag.startRect.x + dx; w = drag.startRect.w - dx; }
+
+      if (w < 12 || x < 0 || x + w > lotW) return;
+      setDriveX(x);
+      setDriveW(w);
+    }
+  }, [toSvgCoords, lotW, lotD, driveX, driveY, driveW, driveH]);
+
+  // Pointer up: end drag
+  const handlePointerUp = useCallback((e) => {
+    if (!dragRef.current) return;
+    if (e && svgRef.current) {
+      try { svgRef.current.releasePointerCapture(e.pointerId); } catch(ex) {}
+    }
+    dragRef.current = null;
+    setDragInfo(null);
+  }, []);
 
   /* ── Copy link ──────────────────────────────────────── */
   const copyLink = useCallback(() => {
     const p = new URLSearchParams();
-    p.set('width', lotW);
-    p.set('depth', lotD);
-    p.set('zone', zone);
-    p.set('street', street);
+    p.set('width', lotW); p.set('depth', lotD);
+    p.set('zone', zone); p.set('street', street);
     if (address) p.set('address', address);
     if (asking) p.set('asking', asking);
     if (lotSFOverride) p.set('lotSF', lotSFOverride);
     if (hasRemainder && remDepth) p.set('remDepth', remDepth);
     p.set('driveWidth', driveW);
-    p.set('driveSide', driveSide);
+    p.set('driveSide', driveX < lotW / 2 ? 'L' : 'R');
     const url = window.location.origin + window.location.pathname + '?' + p.toString();
     navigator.clipboard.writeText(url).then(() => alert('Link copied!'));
-  }, [lotW, lotD, zone, street, address, asking, lotSFOverride, hasRemainder, remDepth, driveW, driveSide]);
+  }, [lotW, lotD, zone, street, address, asking, lotSFOverride, hasRemainder, remDepth, driveW, driveX]);
 
   const takeScreenshot = useCallback(() => {
     const el = canvasRef.current;
@@ -336,26 +454,78 @@ function App() {
   }, [address]);
 
   /* ── Render helpers ─────────────────────────────────── */
-  const fmt = (n) => n != null ? n.toLocaleString() : '—';
-  const fmtM = (n) => n != null ? '$' + (n >= 1e6 ? (n/1e6).toFixed(2) + 'M' : n.toLocaleString()) : '—';
-
-  // Street side label position
+  const fmt = (n) => n != null ? n.toLocaleString() : '\u2014';
+  const fmtM = (n) => n != null ? '$' + (n >= 1e6 ? (n/1e6).toFixed(2) + 'M' : n.toLocaleString()) : '\u2014';
   const streetLabel = { N: 'top', S: 'bottom', E: 'right', W: 'left' }[street] || 'bottom';
 
-  // Remainder zone (always at the street/front side)
-  const remY = 0;
-  const devStartY = hasRemainder ? remDepth : 0;
-
-  // Driveway position
-  const driveX = driveSide === 'L' ? sideSB : lotW - sideSB - driveW;
-  const driveY = devStartY + frontSB;
-  const driveH = lotD - devStartY - frontSB - rearSB;
-
-  // Development zone bounds
+  // Dev zone bounds (for display)
   const devZoneX = sideSB;
   const devZoneY = devStartY + frontSB;
   const devZoneW = lotW - 2 * sideSB;
-  const devZoneH = lotD - devStartY - frontSB - rearSB;
+  const devZoneH = Math.max(0, lotD - devStartY - frontSB - rearSB);
+
+  // Driveway rect for overlap checks in render
+  const driveRect = { x: driveX, y: driveY, w: driveW, h: driveH };
+
+  // Is unit overlapping driveway or another unit?
+  const unitHasOverlap = (u) => {
+    if (rectsOverlap(u, driveRect)) return true;
+    for (const other of units) {
+      if (other.id === u.id) continue;
+      if (rectsOverlap(u, other)) return true;
+    }
+    return false;
+  };
+
+  // Handle size for resize handles (in SVG/feet units)
+  const HS = 3; // visible handle size
+  const HIT = Math.max(6, Math.min(10, lotW * 0.05)); // hit area width
+
+  /* ── Render resize handles for a unit ─────────────────── */
+  const renderUnitHandles = (u) => {
+    const edges = [
+      { edge: 'right',  hx: u.x + u.w - HIT/2, hy: u.y, hw: HIT, hh: u.h,
+        vx: u.x + u.w - HS/2, vy: u.y + u.h/2 - HS*1.5, vw: HS, vh: HS*3, cursor: 'ew-resize' },
+      { edge: 'left',   hx: u.x - HIT/2, hy: u.y, hw: HIT, hh: u.h,
+        vx: u.x - HS/2, vy: u.y + u.h/2 - HS*1.5, vw: HS, vh: HS*3, cursor: 'ew-resize' },
+      { edge: 'bottom', hx: u.x, hy: u.y + u.h - HIT/2, hw: u.w, hh: HIT,
+        vx: u.x + u.w/2 - HS*1.5, vy: u.y + u.h - HS/2, vw: HS*3, vh: HS, cursor: 'ns-resize' },
+      { edge: 'top',    hx: u.x, hy: u.y - HIT/2, hw: u.w, hh: HIT,
+        vx: u.x + u.w/2 - HS*1.5, vy: u.y - HS/2, vw: HS*3, vh: HS, cursor: 'ns-resize' },
+    ];
+    return edges.map(({ edge, hx, hy, hw, hh, vx, vy, vw, vh, cursor }) => (
+      <g key={`handle-${u.id}-${edge}`}>
+        {/* Invisible hit area */}
+        <rect x={ox + hx} y={oy + hy} width={hw} height={hh}
+          fill="transparent" style={{ cursor }}
+          onPointerDown={e => startUnitResize(e, u.id, edge)} />
+        {/* Visible indicator */}
+        <rect x={ox + vx} y={oy + vy} width={vw} height={vh} rx={1}
+          fill="white" stroke="#5B8BD8" strokeWidth={0.6}
+          style={{ pointerEvents: 'none' }} />
+      </g>
+    ));
+  };
+
+  /* ── Render driveway resize handles ────────────────── */
+  const renderDriveHandles = () => {
+    if (driveH <= 0) return null;
+    const edges = [
+      { edge: 'left',  hx: driveX - HIT/2, vx: driveX - HS/2, cursor: 'ew-resize' },
+      { edge: 'right', hx: driveX + driveW - HIT/2, vx: driveX + driveW - HS/2, cursor: 'ew-resize' },
+    ];
+    return edges.map(({ edge, hx, vx, cursor }) => (
+      <g key={`drive-handle-${edge}`}>
+        <rect x={ox + hx} y={oy + driveY} width={HIT} height={driveH}
+          fill="transparent" style={{ cursor }}
+          onPointerDown={e => startDriveResize(e, edge)} />
+        <rect x={ox + vx} y={oy + driveY + driveH/2 - HS*2}
+          width={HS} height={HS*4} rx={1}
+          fill="white" stroke="#999" strokeWidth={0.5}
+          style={{ pointerEvents: 'none' }} />
+      </g>
+    ));
+  };
 
   return (
     <div style={{height:'100vh',display:'flex',flexDirection:'column'}}>
@@ -440,25 +610,25 @@ function App() {
             </div>
             <div className="field-row">
               <div className="field"><label>Driveway width</label>
-                <input type="number" value={driveW} min={16} max={28}
-                  onChange={e=>setDriveW(Number(e.target.value))} /></div>
+                <input type="number" value={driveW} min={12} max={28}
+                  onChange={e=>{const v=Number(e.target.value);setDriveW(v);}} /></div>
               <div className="field">
-                <label>Driveway side</label>
+                <label>Driveway snap</label>
                 <div className="toggle-group">
-                  <button className={`toggle-btn${driveSide==='L'?' active':''}`}
-                    onClick={()=>setDriveSide('L')}>Left</button>
-                  <button className={`toggle-btn${driveSide==='R'?' active':''}`}
-                    onClick={()=>setDriveSide('R')}>Right</button>
+                  <button className={`toggle-btn${driveX < lotW/2 ? ' active':''}`}
+                    onClick={snapDriveLeft}>Left</button>
+                  <button className={`toggle-btn${driveX >= lotW/2 ? ' active':''}`}
+                    onClick={snapDriveRight}>Right</button>
                 </div>
               </div>
             </div>
             <div className="field-row">
-              <div className="field"><label>Unit width (ft)</label>
-                <input type="number" value={unitW} min={16} max={26}
-                  onChange={e=>setUnitW(Number(e.target.value))} /></div>
-              <div className="field"><label>Unit depth (ft)</label>
-                <input type="number" value={unitD} min={30} max={50}
-                  onChange={e=>setUnitD(Number(e.target.value))} /></div>
+              <div className="field"><label>New unit width (ft)</label>
+                <input type="number" value={defUnitW} min={12} max={26}
+                  onChange={e=>setDefUnitW(Number(e.target.value))} /></div>
+              <div className="field"><label>New unit depth (ft)</label>
+                <input type="number" value={defUnitD} min={12} max={50}
+                  onChange={e=>setDefUnitD(Number(e.target.value))} /></div>
             </div>
             <div className="field">
               <label>Stories</label>
@@ -539,12 +709,10 @@ function App() {
 
               {/* Grid background */}
               <defs>
-                <pattern id="grid10" width={10} height={10} patternUnits="userSpaceOnUse"
-                  x={ox} y={oy}>
+                <pattern id="grid10" width={10} height={10} patternUnits="userSpaceOnUse" x={ox} y={oy}>
                   <path d="M 10 0 L 0 0 0 10" fill="none" stroke="#e8e8e8" strokeWidth="0.3"/>
                 </pattern>
-                <pattern id="grid50" width={50} height={50} patternUnits="userSpaceOnUse"
-                  x={ox} y={oy}>
+                <pattern id="grid50" width={50} height={50} patternUnits="userSpaceOnUse" x={ox} y={oy}>
                   <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#ddd" strokeWidth="0.5"/>
                 </pattern>
               </defs>
@@ -566,7 +734,6 @@ function App() {
                     fill="#6D4C41" fontWeight="600" className="dim-label">
                     Existing Home
                   </text>
-                  {/* Remainder depth label */}
                   <text x={ox + lotW + 6} y={oy + remDepth/2} textAnchor="start"
                     dominantBaseline="middle" fontSize={7} fill="#795548" className="dim-label">
                     {remDepth}'
@@ -575,12 +742,13 @@ function App() {
               )}
 
               {/* Development zone fill */}
-              <rect x={ox + devZoneX} y={oy + devZoneY}
-                width={Math.max(0, devZoneW)} height={Math.max(0, devZoneH)}
-                fill="white" fillOpacity={0.4} stroke="none" />
+              {devZoneW > 0 && devZoneH > 0 && (
+                <rect x={ox + devZoneX} y={oy + devZoneY}
+                  width={devZoneW} height={devZoneH}
+                  fill="white" fillOpacity={0.4} stroke="none" />
+              )}
 
               {/* Setback lines */}
-              {/* Front setback */}
               <line x1={ox} y1={oy + devStartY + frontSB}
                 x2={ox + lotW} y2={oy + devStartY + frontSB}
                 stroke="#FF5722" strokeWidth={0.6} strokeDasharray="3,2" />
@@ -589,7 +757,6 @@ function App() {
                 {frontSB}' front
               </text>
 
-              {/* Rear setback */}
               <line x1={ox} y1={oy + lotD - rearSB}
                 x2={ox + lotW} y2={oy + lotD - rearSB}
                 stroke="#FF5722" strokeWidth={0.6} strokeDasharray="3,2" />
@@ -598,7 +765,6 @@ function App() {
                 {rearSB}' rear
               </text>
 
-              {/* Side setbacks */}
               <line x1={ox + sideSB} y1={oy + devStartY}
                 x2={ox + sideSB} y2={oy + lotD}
                 stroke="#FF5722" strokeWidth={0.6} strokeDasharray="3,2" />
@@ -606,80 +772,106 @@ function App() {
                 x2={ox + lotW - sideSB} y2={oy + lotD}
                 stroke="#FF5722" strokeWidth={0.6} strokeDasharray="3,2" />
 
-              {/* Driveway */}
+              {/* Driveway — draggable + resizable */}
               {driveH > 0 && (
-                <g>
+                <g onPointerEnter={() => !dragInfo && setHoveredDrive(true)}
+                   onPointerLeave={() => !dragInfo && setHoveredDrive(false)}>
+                  {/* Driveway body */}
                   <rect x={ox + driveX} y={oy + driveY}
-                    width={driveW} height={Math.max(0, driveH)}
-                    fill="#D5D0CB" fillOpacity={0.7} stroke="#B0A89F" strokeWidth={0.5} />
-                  <text x={ox + driveX + driveW/2} y={oy + driveY + Math.max(0,driveH)/2}
+                    width={driveW} height={driveH}
+                    fill="#D5D0CB" fillOpacity={0.7}
+                    stroke={hoveredDrive || (dragInfo && dragInfo.type.startsWith('drive')) ? '#888' : '#B0A89F'}
+                    strokeWidth={hoveredDrive || (dragInfo && dragInfo.type.startsWith('drive')) ? 1 : 0.5}
+                    style={{ cursor: dragInfo && dragInfo.type === 'drive-move' ? 'grabbing' : 'grab' }}
+                    onPointerDown={startDriveMove} />
+                  {/* Driveway label */}
+                  <text x={ox + driveX + driveW/2} y={oy + driveY + driveH/2}
                     textAnchor="middle" dominantBaseline="middle"
                     fontSize={Math.min(7, driveW/4)} fill="#6B6B6B" fontWeight="600"
-                    className="dim-label" transform={`rotate(-90, ${ox+driveX+driveW/2}, ${oy+driveY+Math.max(0,driveH)/2})`}>
+                    className="dim-label"
+                    transform={`rotate(-90, ${ox+driveX+driveW/2}, ${oy+driveY+driveH/2})`}>
                     Driveway {driveW}'
                   </text>
+                  {/* Resize handles (always shown when hovered or dragging) */}
+                  {(hoveredDrive || (dragInfo && dragInfo.type.startsWith('drive'))) && renderDriveHandles()}
                 </g>
               )}
 
               {/* Yard space behind units */}
               {units.map(u => {
-                const yardX = u.x + u.w;
-                const yardW = driveSide === 'L'
-                  ? lotW - sideSB - u.x - u.w
-                  : u.x - sideSB;
-                const yardActualX = driveSide === 'L' ? u.x + u.w : sideSB;
+                // Compute yard on the far side from driveway
+                const driveCenterX = driveX + driveW / 2;
+                const unitCenterX = u.x + u.w / 2;
+                const driveIsLeft = driveCenterX < unitCenterX;
+                let yardX, yardW;
+                if (driveIsLeft) {
+                  // Yard on right side of unit
+                  yardX = u.x + u.w;
+                  yardW = lotW - u.x - u.w;
+                } else {
+                  // Yard on left side of unit
+                  yardX = 0;
+                  yardW = u.x;
+                }
                 if (yardW <= 0) return null;
                 return (
                   <rect key={`yard-${u.id}`}
-                    x={ox + yardActualX} y={oy + u.y}
+                    x={ox + yardX} y={oy + u.y}
                     width={yardW} height={u.h}
-                    fill="#C8E6C9" fillOpacity={0.4} stroke="none" />
+                    fill="#C8E6C9" fillOpacity={0.3} stroke="none" />
                 );
               })}
 
-              {/* Units */}
+              {/* Units — draggable + resizable */}
               {units.map(u => {
                 const isHovered = hoveredUnit === u.id;
-                const isDragging = dragState && dragState.unitId === u.id;
-                // Check if this unit has any violations
-                const minY = frontSB + (hasRemainder ? remDepth : 0);
-                const maxY = lotD - rearSB;
+                const isDragging = dragInfo && dragInfo.unitId === u.id;
+                const isMoving = isDragging && dragInfo.type === 'unit-move';
                 const invalid = u.x < sideSB - 0.5 || u.x + u.w > lotW - sideSB + 0.5
-                  || u.y < minY - 0.5 || u.y + u.h > maxY + 0.5;
+                  || u.y < devStartY + frontSB - 0.5 || u.y + u.h > lotD - rearSB + 0.5
+                  || unitHasOverlap(u);
+
                 return (
-                  <g key={u.id}>
+                  <g key={u.id}
+                    onPointerEnter={() => !dragInfo && setHoveredUnit(u.id)}
+                    onPointerLeave={() => !dragInfo && setHoveredUnit(null)}>
+                    {/* Unit rectangle */}
                     <rect
                       x={ox + u.x} y={oy + u.y} width={u.w} height={u.h}
                       fill={invalid ? '#FFCDD2' : '#3B7DD8'}
                       fillOpacity={isHovered ? 0.9 : 0.75}
                       stroke={invalid ? '#D32F2F' : '#2C3E6B'}
-                      strokeWidth={isHovered ? 2 : 1}
+                      strokeWidth={isHovered || isDragging ? 2 : 1}
                       rx={1}
-                      className={`unit-rect${isDragging ? ' dragging' : ''}${invalid ? ' invalid' : ''}`}
-                      onPointerDown={e => handlePointerDown(e, u.id)}
-                      onPointerEnter={() => setHoveredUnit(u.id)}
-                      onPointerLeave={() => setHoveredUnit(null)}
+                      style={{ cursor: isMoving ? 'grabbing' : 'grab' }}
+                      onPointerDown={e => startUnitMove(e, u.id)}
                     />
+                    {/* Unit label */}
                     <text x={ox + u.x + u.w/2} y={oy + u.y + u.h/2 - 2}
                       textAnchor="middle" dominantBaseline="middle"
-                      fontSize={Math.min(7, u.h/4)} fill="white" fontWeight="700"
+                      fontSize={Math.min(7, Math.min(u.w, u.h)/4)} fill="white" fontWeight="700"
                       className="dim-label">
                       Unit {u.id}
                     </text>
-                    <text x={ox + u.x + u.w/2} y={oy + u.y + u.h/2 + 6}
+                    <text x={ox + u.x + u.w/2} y={oy + u.y + u.h/2 + 5}
                       textAnchor="middle" dominantBaseline="middle"
-                      fontSize={Math.min(5, u.h/6)} fill="rgba(255,255,255,0.8)"
+                      fontSize={Math.min(5, Math.min(u.w, u.h)/6)} fill="rgba(255,255,255,0.85)"
                       className="dim-label">
                       {u.w}' x {u.h}'
                     </text>
-                    {/* Delete button on hover */}
+
+                    {/* Resize handles (shown on hover or during resize of this unit) */}
+                    {(isHovered || isDragging) && !isMoving && renderUnitHandles(u)}
+
+                    {/* Delete button on hover (not during drag) */}
                     {isHovered && !isDragging && (
                       <g style={{cursor:'pointer'}} onClick={() => removeUnit(u.id)}>
                         <circle cx={ox + u.x + u.w - 3} cy={oy + u.y + 3} r={4}
                           fill="#D32F2F" />
                         <text x={ox + u.x + u.w - 3} y={oy + u.y + 3.5}
                           textAnchor="middle" dominantBaseline="middle"
-                          fontSize={5} fill="white" fontWeight="700">x</text>
+                          fontSize={5} fill="white" fontWeight="700"
+                          className="dim-label">x</text>
                       </g>
                     )}
                   </g>
@@ -689,58 +881,44 @@ function App() {
               {/* Street label */}
               {streetLabel === 'bottom' && (
                 <g>
-                  <rect x={ox} y={oy + lotD + 2} width={lotW} height={12}
-                    fill="#6B6B6B" rx={1} />
+                  <rect x={ox} y={oy + lotD + 2} width={lotW} height={12} fill="#6B6B6B" rx={1} />
                   <text x={ox + lotW/2} y={oy + lotD + 9} textAnchor="middle"
-                    fontSize={6} fill="white" fontWeight="600" className="dim-label">
-                    STREET
-                  </text>
+                    fontSize={6} fill="white" fontWeight="600" className="dim-label">STREET</text>
                 </g>
               )}
               {streetLabel === 'top' && (
                 <g>
-                  <rect x={ox} y={oy - 14} width={lotW} height={12}
-                    fill="#6B6B6B" rx={1} />
+                  <rect x={ox} y={oy - 14} width={lotW} height={12} fill="#6B6B6B" rx={1} />
                   <text x={ox + lotW/2} y={oy - 7} textAnchor="middle"
-                    fontSize={6} fill="white" fontWeight="600" className="dim-label">
-                    STREET
-                  </text>
+                    fontSize={6} fill="white" fontWeight="600" className="dim-label">STREET</text>
                 </g>
               )}
               {streetLabel === 'left' && (
                 <g>
-                  <rect x={ox - 14} y={oy} width={12} height={lotD}
-                    fill="#6B6B6B" rx={1} />
+                  <rect x={ox - 14} y={oy} width={12} height={lotD} fill="#6B6B6B" rx={1} />
                   <text x={ox - 8} y={oy + lotD/2} textAnchor="middle"
                     fontSize={6} fill="white" fontWeight="600" className="dim-label"
-                    transform={`rotate(-90, ${ox-8}, ${oy+lotD/2})`}>
-                    STREET
-                  </text>
+                    transform={`rotate(-90, ${ox-8}, ${oy+lotD/2})`}>STREET</text>
                 </g>
               )}
               {streetLabel === 'right' && (
                 <g>
-                  <rect x={ox + lotW + 2} y={oy} width={12} height={lotD}
-                    fill="#6B6B6B" rx={1} />
+                  <rect x={ox + lotW + 2} y={oy} width={12} height={lotD} fill="#6B6B6B" rx={1} />
                   <text x={ox + lotW + 8} y={oy + lotD/2} textAnchor="middle"
                     fontSize={6} fill="white" fontWeight="600" className="dim-label"
-                    transform={`rotate(90, ${ox+lotW+8}, ${oy+lotD/2})`}>
-                    STREET
-                  </text>
+                    transform={`rotate(90, ${ox+lotW+8}, ${oy+lotD/2})`}>STREET</text>
                 </g>
               )}
 
               {/* Dimension labels */}
-              {/* Lot width - top */}
               <g>
                 <line x1={ox} y1={oy - 18} x2={ox + lotW} y2={oy - 18}
-                  stroke="#1B2A4A" strokeWidth={0.5} markerStart="url(#arrowL)" markerEnd="url(#arrowR)" />
+                  stroke="#1B2A4A" strokeWidth={0.5} />
                 <line x1={ox} y1={oy - 20} x2={ox} y2={oy - 16} stroke="#1B2A4A" strokeWidth={0.5} />
                 <line x1={ox+lotW} y1={oy - 20} x2={ox+lotW} y2={oy - 16} stroke="#1B2A4A" strokeWidth={0.5} />
                 <text x={ox + lotW/2} y={oy - 20} textAnchor="middle" fontSize={7}
                   fill="#1B2A4A" fontWeight="600" className="dim-label">{lotW}'</text>
               </g>
-              {/* Lot depth - right */}
               <g>
                 <line x1={ox + lotW + 18} y1={oy} x2={ox + lotW + 18} y2={oy + lotD}
                   stroke="#1B2A4A" strokeWidth={0.5} />
@@ -777,14 +955,14 @@ function App() {
               </g>
 
               {/* Hover tooltip */}
-              {hoveredUnit && (() => {
+              {hoveredUnit && !dragInfo && (() => {
                 const u = units.find(u => u.id === hoveredUnit);
                 if (!u) return null;
                 const tx = ox + u.x + u.w + 5;
                 const ty = oy + u.y;
                 return (
                   <g className="tooltip-box">
-                    <rect x={tx} y={ty} width={52} height={32} fill="white"
+                    <rect x={tx} y={ty} width={56} height={38} fill="white"
                       stroke="#ccc" strokeWidth={0.5} rx={2} />
                     <text x={tx+4} y={ty+10} fontSize={5} fill="#333" className="dim-label">
                       Unit {u.id}: {u.w}' x {u.h}'
@@ -794,6 +972,9 @@ function App() {
                     </text>
                     <text x={tx+4} y={ty+26} fontSize={5} fill="#666" className="dim-label">
                       Habitable: {fmt(u.w * u.h * stories)} SF
+                    </text>
+                    <text x={tx+4} y={ty+34} fontSize={4.5} fill="#999" className="dim-label">
+                      Drag edges to resize
                     </text>
                   </g>
                 );
@@ -824,7 +1005,7 @@ function App() {
               <div className="stat">
                 <span className="stat-label">Avg Parcel</span>
                 <span className={`stat-value${avgParcel>0&&avgParcel<1200?' warn':''}`}>
-                  {units.length > 0 ? fmt(Math.round(avgParcel)) + ' SF' : '—'}
+                  {units.length > 0 ? fmt(Math.round(avgParcel)) + ' SF' : '\u2014'}
                 </span>
               </div>
               <div className="stat-sep" />

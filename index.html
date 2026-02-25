@@ -998,32 +998,28 @@ function App() {
                 if (!u) return null;
                 const tx = ox + u.x + u.w + 5;
                 const ty = oy + u.y;
+                const g = garageForUnit(u);
+                const habSF = u.w * u.h * stories - g.sf;
                 return (
-                  {(() => {
-                    const g = garageForUnit(u);
-                    const habSF = u.w * u.h * stories - g.sf;
-                    return (
-                      <g className="tooltip-box">
-                        <rect x={tx} y={ty} width={64} height={46} fill="white"
-                          stroke="#ccc" strokeWidth={0.5} rx={2} />
-                        <text x={tx+4} y={ty+9} fontSize={5} fill="#333" className="dim-label">
-                          Unit {u.id}: {u.w}' x {u.h}'
-                        </text>
-                        <text x={tx+4} y={ty+17} fontSize={5} fill="#666" className="dim-label">
-                          Garage: {g.gd}' x {g.gw}' = {fmt(g.sf)} SF
-                        </text>
-                        <text x={tx+4} y={ty+25} fontSize={5} fill="#666" className="dim-label">
-                          Habitable: {fmt(habSF)} SF
-                        </text>
-                        <text x={tx+4} y={ty+33} fontSize={5} fill="#999" className="dim-label">
-                          Total: {fmt(u.w * u.h * stories)} SF ({stories}F)
-                        </text>
-                        <text x={tx+4} y={ty+41} fontSize={4.5} fill="#aaa" className="dim-label">
-                          Drag edges to resize
-                        </text>
-                      </g>
-                    );
-                  })()}
+                  <g className="tooltip-box">
+                    <rect x={tx} y={ty} width={64} height={46} fill="white"
+                      stroke="#ccc" strokeWidth={0.5} rx={2} />
+                    <text x={tx+4} y={ty+9} fontSize={5} fill="#333" className="dim-label">
+                      Unit {u.id}: {u.w}' x {u.h}'
+                    </text>
+                    <text x={tx+4} y={ty+17} fontSize={5} fill="#666" className="dim-label">
+                      Garage: {g.gd}' x {g.gw}' = {fmt(g.sf)} SF
+                    </text>
+                    <text x={tx+4} y={ty+25} fontSize={5} fill="#666" className="dim-label">
+                      Habitable: {fmt(habSF)} SF
+                    </text>
+                    <text x={tx+4} y={ty+33} fontSize={5} fill="#999" className="dim-label">
+                      Total: {fmt(u.w * u.h * stories)} SF ({stories}F)
+                    </text>
+                    <text x={tx+4} y={ty+41} fontSize={4.5} fill="#aaa" className="dim-label">
+                      Drag edges to resize
+                    </text>
+                  </g>
                 );
               })()}
             </svg>

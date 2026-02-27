@@ -93,7 +93,7 @@ function readParams() {
     asking: p.get('asking') ? Number(p.get('asking')) : null,
     lotSF: p.get('lotSF') ? Number(p.get('lotSF')) : null,
     remDepth: p.get('remDepth') ? Number(p.get('remDepth')) : 0,
-    driveWidth: p.get('driveWidth') ? Number(p.get('driveWidth')) : 20,
+    driveWidth: p.get('driveWidth') ? Number(p.get('driveWidth')) : 24,
     driveSide: p.get('driveSide') || 'L',
   };
 }
@@ -137,10 +137,12 @@ function computeAutoLayout(cfg) {
         units.push({ id: id++, x: newDriveX + driveW, y: startY + i * unitW, w: Math.min(unitD, rightW), h: unitW });
     }
   } else {
+    // Driveway flush to lot edge (includes side setback on that side)
+    // Non-driveway side: SB 1123 allows 0' setback
     const isLeft = driveX <= lotW / 2;
-    newDriveX = isLeft ? sideSB : lotW - sideSB - driveW;
-    const unitX = isLeft ? sideSB + driveW : sideSB;
-    const availW = lotW - 2 * sideSB - driveW;
+    newDriveX = isLeft ? 0 : lotW - driveW;
+    const unitX = isLeft ? driveW : 0;
+    const availW = lotW - driveW;
     actualUnitD = Math.min(unitD, availW);
     if (availW < 20) return { units: [], driveX: newDriveX, actualUnitD };
     const perRow = Math.max(0, Math.floor(devD / unitW));
@@ -173,11 +175,14 @@ function checkConstraints(units, cfg) {
   if (far > farLimit) warnings.push(`FAR ${far.toFixed(2)} exceeds ${farLimit} limit for ${units.length} units`);
 
   // Setback violations
+  // SB 1123: driveway side setback is covered by driveway; non-driveway side allows 0'
   const minY = frontSB + devStartY;
   const maxY = lotD - rearSB;
+  const driveIsLeft = driveX < lotW / 2;
   units.forEach(u => {
-    if (u.x < sideSB - 0.5) warnings.push(`Unit ${u.id}: side setback violation (left)`);
-    if (u.x + u.w > lotW - sideSB + 0.5) warnings.push(`Unit ${u.id}: side setback violation (right)`);
+    // Side setback: only check that units don't extend past lot boundary
+    if (u.x < -0.5) warnings.push(`Unit ${u.id}: extends past left lot line`);
+    if (u.x + u.w > lotW + 0.5) warnings.push(`Unit ${u.id}: extends past right lot line`);
     if (u.y < minY - 0.5) warnings.push(`Unit ${u.id}: front setback violation`);
     if (u.y + u.h > maxY + 0.5) warnings.push(`Unit ${u.id}: rear setback violation`);
   });
@@ -219,13 +224,13 @@ function App() {
   const [remDepth, setRemDepth] = useState(params.remDepth || 0);
 
   // Standards
-  const [frontSB, setFrontSB] = useState(15);
+  const [frontSB, setFrontSB] = useState(params.zone === 'R2' || params.zone === 'R3' || params.zone === 'R4' ? 15 : 20);
   const [sideSB, setSideSB] = useState(4);
   const [rearSB, setRearSB] = useState(4);
   const [stories, setStories] = useState(3);
 
   // Driveway — absolute position + width
-  const initDriveX = params.driveSide === 'R' ? params.width - 4 - params.driveWidth : 4;
+  const initDriveX = params.driveSide === 'R' ? params.width - params.driveWidth : 0;
   const [driveX, setDriveX] = useState(initDriveX);
   const [driveW, setDriveW] = useState(params.driveWidth);
 
@@ -482,9 +487,10 @@ function App() {
   const streetLabel = { N: 'top', S: 'bottom', E: 'right', W: 'left' }[street] || 'bottom';
 
   // Dev zone bounds (for display)
-  const devZoneX = sideSB;
+  // Buildable zone: full lot width (driveway covers side setback on its side, 0' on other side)
+  const devZoneX = 0;
   const devZoneY = devStartY + frontSB;
-  const devZoneW = lotW - 2 * sideSB;
+  const devZoneW = lotW;
   const devZoneH = Math.max(0, lotD - devStartY - frontSB - rearSB);
 
   // Driveway rect for overlap checks in render
